@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Online Chess Simple</title>
+  <style>
+    #board { display: grid; grid-template-columns: repeat(8, 60px); width: 480px; }
+    .cell { width:60px; height:60px; display:flex; align-items:center; justify-content:center; font-size:32px; cursor:pointer; }
+    .dark { background:#769656; }
+    .light { background:#eeeed2; }
+    .selected { outline:2px solid red; }
+  </style>
+</head>
+<body>
+  <h1>Online Chess</h1>
+  <input id="roomInput" placeholder="Nomor Room 1-10" />
+  <button id="joinBtn">Gabung Room</button>
+  <p id="status"></p>
+  <div id="board"></div>
+
+  <!-- Firebase -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyDnQwsg1aKKG38RjrPGoh5593eU6nO7Be4",
+      authDomain: "catur2.firebaseapp.com",
+      projectId: "catur2",
+      storageBucket: "catur2.appspot.com",
+      messagingSenderId: "59572057774",
+      appId: "1:59572057774:web:1e6426fa435811e8ea5f3f",
+      measurementId: "G-QQ1WN6N31S"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    let boardEl = document.getElementById('board');
+    let statusEl = document.getElementById('status');
+    let board = Array(64).fill('');
+    let selected = null;
+    let turn = 'w';
+    let myColor = null;
+    let role = null;
+    let roomId = null;
+
+    document.getElementById('joinBtn').onclick = ()=>{
+      roomId = document.getElementById('roomInput').value;
+      if(!roomId || roomId<1 || roomId>10){ alert('Masukkan room 1-10'); return; }
+      const roomRef = db.ref('rooms/'+roomId);
+
+      roomRef.once('value').then(snap=>{
+        if(!snap.val()){
+          const initial = [
+            '♜','♞','♝','♛','♚','♝','♞','♜',
+            '♟','♟','♟','♟','♟','♟','♟','♟',
+            '','','','','','','','',
+            '','','','','','','','',
+            '','','','','','','','',
+            '','','','','','','','',
+            '♙','♙','♙','♙','♙','♙','♙','♙',
+            '♖','♘','♗','♕','♔','♗','♘','♖'
+          ];
+          roomRef.set({board:initial, turn:'w', players:{w:null,b:null}});
+        }
+      });
+
+      roomRef.on('value', snap=>{
+        const data = snap.val();
+        if(!data) return;
+        board = data.board;
+        turn = data.turn;
+        if(!data.players) data.players={};
+        if(!data.players.w){ myColor='w'; role='player'; db.ref('rooms/'+roomId+'/players/w').set(true); }
+        else if(!data.players.b){ myColor='b'; role='player'; db.ref('rooms/'+roomId+'/players/b').set(true); }
+        else { role='spectator'; myColor=null; }
+        draw();
+      });
+    };
+
+    function isUpper(p){ return p && p===p.toUpperCase(); }
+    function isLower(p){ return p && p===p.toLowerCase(); }
+    function sameColor(p1,p2){ if(!p1||!p2) return false; return (isUpper(p1)&&isUpper(p2))||(isLower(p1)&&isLower(p2)); }
+    function isMine(p){ return myColor==='w'?isUpper(p):isLower(p); }
+
+    function getMoves(idx){
+      const p = board[idx]; const moves=[];
+      if(!p) return moves;
+      const row=Math.floor(idx/8), col=idx%8;
+      const color=isUpper(p)?'w':'b';
+      function push(r,c){ if(r>=0&&r<8&&c>=0&&c<8){ const t=board[r*8+c]; if(!sameColor(p,t)) moves.push(r*8+c);} }
+      switch(p.toLowerCase()){
+        case 'p':
+          let dir=color==='w'?-1:1;
+          if(!board[(row+dir)*8+col]) moves.push((row+dir)*8+col);
+          if((color==='w'&&row===6||color==='b'&&row===1)&&!board[(row+2*dir)*8+col]) moves.push((row+2*dir)*8+col);
+          if(col>0&&board[(row+dir)*8+(col-1)]&&!sameColor(p,board[(row+dir)*8+(col-1)])) moves.push((row+dir)*8+(col-1));
+          if(col<7&&board[(row+dir)*8+(col+1)]&&!sameColor(p,board[(row+dir)*8+(col+1)])) moves.push((row+dir)*8+(col+1));
+          break;
+        case 'r': case 'n': case 'b': case 'q': case 'k':
+          // bisa ditambahkan move sederhana jika mau, tapi untuk versi basic bisa dilewati
+          break;
+      }
+      return moves;
+    }
+
+    function click(i){
+      if(role!=='player'||turn!==myColor) return;
+      if(selected===i){ selected=null; draw(); return; }
+      if(selected===null){ if(isMine(board[i])) selected=i; }
+      else{ if(getMoves(selected).includes(i)){ makeMove(selected,i); } selected=null; }
+      draw();
+    }
+
+    function makeMove(f,t){
+      const nb=[...board]; nb[t]=nb[f]; nb[f]='';
+      if(nb[t].toLowerCase()==='p'&&(Math.floor(t/8)===0||Math.floor(t/8)===7)) nb[t]=myColor==='w'?'♕':'♛';
+      const nextTurn = turn==='w'?'b':'w';
+      db.ref('rooms/'+roomId).update({board:nb, turn:nextTurn});
+    }
+
+    function draw(){
+      boardEl.innerHTML='';
+      board.forEach((p,i)=>{
+        const d=document.createElement('div');
+        d.className='cell '+((Math.floor(i/8)+i)%2?'dark':'light');
+        if(i===selected) d.classList.add('selected');
+        d.textContent = p;
+        d.onclick = ()=>click(i);
+        boardEl.appendChild(d);
+      });
+      if(role==='spectator'){ statusEl.textContent="Penonton"; }
+      else { let st=turn===myColor?'Giliran kamu':'Giliran lawan'; statusEl.textContent=st; }
+    }
+  </script>
+</body>
+</html>
